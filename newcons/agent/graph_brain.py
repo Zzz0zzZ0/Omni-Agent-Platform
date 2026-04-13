@@ -1,12 +1,12 @@
 from typing import Annotated, TypedDict
 from langchain_core.messages import SystemMessage, AnyMessage
-from langchain_google_genai import ChatGoogleGenerativeAI, HarmCategory, HarmBlockThreshold
+from langchain_community.chat_models import ChatTongyi
 from langchain_ollama import ChatOllama
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_community.tools import DuckDuckGoSearchResults
 from engine.rag_pipeline import LocalKnowledgeTool
 from agent.tools import (
     star_rail_gacha_calculator,
@@ -18,7 +18,7 @@ class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
 def build_graph_agent(vectorstore=None, bm25_retriever=None, **kwargs):
-    web_search_tool = TavilySearchResults(max_results=3, description="查询外部实时信息、游戏攻略时使用。")
+    web_search_tool = DuckDuckGoSearchResults(max_results=3, description="查询外部实时信息、游戏版本攻略、官网新闻时使用。")
     
     # 装载四大神器
     tools = [
@@ -38,7 +38,7 @@ def build_graph_agent(vectorstore=None, bm25_retriever=None, **kwargs):
     if model_type == "local":
         llm = ChatOllama(model="qwen3:8b", temperature=temp_val)
     else:
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=temp_val, safety_settings={HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE})
+        llm = ChatTongyi(model="qwen-plus", temperature=temp_val)
     
     llm_with_tools = llm.bind_tools(tools)
 
@@ -47,7 +47,7 @@ def build_graph_agent(vectorstore=None, bm25_retriever=None, **kwargs):
         "1. 玩家抽卡计算，调用 star_rail_gacha_calculator。\n"
         "2. 总结玩家吐槽与负面舆情，调用 analyze_community_feedback。\n"
         "3. 要求写致歉公告、滑轨文案，调用 generate_pr_announcement。\n"
-        "4. 查询外网攻略/新闻，使用 tavily_search_results_json。\n"
+        "4. 查询外网攻略/新闻，使用 DuckDuckGoSearchResults（注意：模型在调用时会自动使用此名称）。\n"
     ))
 
     def call_model(state: AgentState):

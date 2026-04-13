@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.chat_models import ChatTongyi
 from langchain_core.tools import tool
 
 
@@ -69,7 +69,6 @@ def generate_pr_announcement(issue_summary: str, compensation: str = "300星琼"
         "你现在是《崩坏：星穹铁道》列车长帕姆。"
         f"针对玩家问题：【{issue_summary}】写一份真诚的滑轨道歉公告，并宣布全服补偿：{compensation}。"
     )
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
+    llm = ChatTongyi(model="qwen-plus", temperature=0.7)
     res = llm.invoke(prompt)
     return f"【已自动生成公关滑轨草案，请审核】\n\n{res.content}"
-

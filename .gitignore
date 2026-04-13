@@ -24,3 +24,7 @@ rag_v2/
 .vscode/
 .idea/
 .DS_Store
+# 6. 前端构建与依赖
+node_modules/
+dist/
+.env.*

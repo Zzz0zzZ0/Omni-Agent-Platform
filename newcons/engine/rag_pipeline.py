@@ -5,7 +5,7 @@ from datetime import datetime
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.chat_models import ChatTongyi
 from langchain_ollama import ChatOllama
 from langchain_core.tools import StructuredTool
 from langchain_core.tools import tool as lc_tool  # if needed elsewhere
@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from engine.vector_store import embeddings
 from perception.nlp_pipeline import analyze_user_query
-from algorithms.linucb import linucb_agent
+from algorithms.linucb import ticket_recommender
 from algorithms.prf import algo_pseudo_relevance_feedback
 from algorithms.mmr import algo_mmr_rerank
 
@@ -74,13 +74,13 @@ def log_negative_feedback_sync(question, emotion_label, persona_str):
         )
         conn.commit()
     except Exception as e:
-        print(f"写入舆情数据库失败: {e}")
+        print(f"Failed to log feedback: {e}")
     finally:
         try:
             conn.close()
         except:
             pass
-
+        
     # 0. NLP 结构化感知 (情绪、实体、玩家画像)
     if use_emotion or use_ner:
         emotion_label, extracted_entities, player_persona = analyze_user_query(
@@ -91,7 +91,7 @@ def log_negative_feedback_sync(question, emotion_label, persona_str):
     if model_type == "local":
         llm = ChatOllama(model="qwen3:8b", temperature=temp_param)
     else:
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=temp_param)
+        llm = ChatTongyi(model="qwen-plus", temperature=temp_param)
 
     # 2. LinUCB
     final_alpha = alpha
@@ -100,7 +100,7 @@ def log_negative_feedback_sync(question, emotion_label, persona_str):
     if use_auto_alpha:
         # 使用 Query 的 embedding 切片作为 LinUCB 特征
         q_vec = embeddings.embed_query(question)
-        arm_idx, final_alpha, context_vec = linucb_agent.select_arm(q_vec)
+        arm_idx, final_alpha, context_vec = ticket_recommender.select_arm(q_vec)
 
     # 3. 混合检索 (增加空载保护)
     initial_docs = []
@@ -145,16 +145,16 @@ def log_negative_feedback_sync(question, emotion_label, persona_str):
 
     # 7. 生成阶段
     tone_instruction = (
-        "检测到用户情绪焦虑。请使用安抚性语气回答。" if emotion_label == "negative" else ""
+        "User detected as anxious. Use calm and soothing tone." if emotion_label == "negative" else ""
     )
     
     # 如果没有文档，就不要强行插入“【记忆片段】”让它困惑了
     if final_docs:
-        system_prompt = f"你是一个认知智能体。{tone_instruction}\n根据记忆片段回答。\n\n【记忆片段】:\n{{context}}"
+        system_prompt = f"You are a cognitive agent. {tone_instruction}\nAnswer based on memory fragments.\n\n[Memory Fragments]:\n{{context}}"
         context_text = "\n\n".join([d.page_content for d in final_docs])
     else:
-        system_prompt = f"你是一个专业的游戏运营认知智能体。{tone_instruction}\n请根据你的基础知识回答。"
-        context_text = "（当前无外部记忆片段）"
+        system_prompt = f"You are a professional game ops cognitive agent. {tone_instruction}\nPlease answer based on your knowledge base."
+        context_text = "(No external memory found)"
 
     prompt = ChatPromptTemplate.from_template(system_prompt + "\n\n问题: {input}")
     res = (prompt | llm).invoke({"input": question, "context": context_text})
@@ -186,7 +186,7 @@ class LocalKnowledgeTool:
     def _run_search(self, query: str) -> str:
         result = get_answer_complex(self.vectorstore, self.bm25_retriever, query, **self.config)
         docs_text = "\n".join([f"- {d.page_content}" for d in result["context"]])
-        return f"【结论】: {result['answer']}\n【参考】:\n{docs_text}\n"
+        return f"[Conclusion]: {result['answer']}\n[References]:\n{docs_text}\n"
 
     def get_tool(self) -> StructuredTool:
         return StructuredTool.from_function(
@@ -195,4 +195,3 @@ class LocalKnowledgeTool:
             description="查询内部文档时调用。",
             args_schema=LocalSearchInput,
         )
-

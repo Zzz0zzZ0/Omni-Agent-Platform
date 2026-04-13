@@ -1,12 +1,12 @@
 from pydantic import BaseModel, Field
 from typing import List
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.chat_models import ChatTongyi
 from langchain_ollama import ChatOllama
 import json
 import re
 
-print("🧠 [Perception] 正在激活基于 LLM 结构化输出的全新感知边缘系统...")
+print("[Perception] Activating LLM Perception System...")
 
 # 定义严格的数据输出骨架 (Schema)
 class UserPerception(BaseModel):
@@ -14,13 +14,14 @@ class UserPerception(BaseModel):
     entities: List[str] = Field(description="用户提到的核心实体，如角色名、游戏玩法等。")
     player_persona: List[str] = Field(description="根据用户发言推断的玩家画像标签，如 [强度党], [剧情党], [萌新], [零氪], [重氪] 等。")
     game_entities: List[str] = Field(description="提取玩家发言中提到的游戏专有名词、角色名、物品名等实体（如：'黄泉', '混沌回忆', '星琼'）")
+
 def analyze_user_query(query: str, model_type="cloud", temp_val=0.1):
     """统一感知接口：一次性提取情感、实体与玩家画像"""
     try:
         if model_type == "local":
             llm = ChatOllama(model="qwen3:8b", temperature=temp_val)
         else:
-            llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=temp_val)
+            llm = ChatTongyi(model="qwen-plus", temperature=temp_val)
         
         # 强制 LLM 按照 Pydantic 类输出结构化数据
         structured_llm = llm.with_structured_output(UserPerception)

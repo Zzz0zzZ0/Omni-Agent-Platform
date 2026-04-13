@@ -7,6 +7,7 @@ langchain-chroma>=0.2.0
 langchain-huggingface>=0.1.0
 langchain-google-genai>=2.0.0
 langchain-ollama>=0.2.0
+dashscope>=1.14.0
 streamlit>=1.40.0
 chromadb>=0.5.0
 scikit-learn>=1.4.0
@@ -18,3 +19,13 @@ pandas>=2.2.0
 plotly>=5.24.0
 pydantic>=2.0.0
 pypdf>=5.0.0
+
+# 多模态增强
+docling>=2.0.0
+paddleocr>=2.7.0
+paddlepaddle>=2.6.0
+opencv-python>=4.9.0
+langgraph>=0.2.0
+fastapi>=0.100.0
+uvicorn>=0.20.0
+python-multipart>=0.0.6

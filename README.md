@@ -1,160 +1,105 @@
-# 🧠 Neuromorphic RAG Agent: LangGraph & Hybrid Search Architecture
+# 🎮 Honkai Agent Platform: ToB 级游戏运营 AI 看板与智能体系统
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-00a393.svg)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-FF4B4B.svg)
-![LangGraph](https://img.shields.io/badge/LangGraph-Multi--Agent-orange.svg)
+![React](https://img.shields.io/badge/React-18+-61dafb.svg)
+![DashScope](https://img.shields.io/badge/Alibaba-DashScope-orange.svg)
+![Tailwind](https://img.shields.io/badge/Tailwind-CSS-38b2ac.svg)
 
-本项目是一个具有"类脑认知架构"的**高级混合检索与智能体决策系统**。系统摒弃了传统的单链或黑盒调用，采用有向循环图 (Cyclic Graph) 重构了大模型的推理大脑，并深度融合了强化学习与经典信息检索算法。
-
-系统在工程实现上高度模块化，分为**感知层 (Perception)、记忆层 (Memory)、算法层 (Algorithms) 和 决策网络 (Agent)**，是一个具备极强扩展性的 Search-based LLM 应用范例。
+本项目是一款专为《崩坏：星穹铁道》等高并发二次元游戏打造的 **ToB 级运营数据看板与自动化客诉处理系统**。系统深度融合了多模态感知、自适应 RAG 检索与个性化强化学习推荐算法，将零散的玩家反馈转化为可闭环的运营决策。
 
 ---
 
-## 🌟 核心架构与技术亮点
+## 🌟 核心技术亮点
 
-### 1. 前额叶皮层：基于 LangGraph 的多步决策网络 (Agent)
+### 1. 国产化大模型底座 (Alibaba DashScope)
+- **核心引擎**: 全链路接入 **阿里云百炼 (通义千问 Qwen-Plus)**，在语义理解、长文本摘要以及 Agent 逻辑编排上实现了高可用与低延迟。
+- **搜索增强**: 移除了海外 Tavily 依赖，采用 **DuckDuckGo Search** 自动化工具，实现零成本的外网实时更新。
 
-- **状态机流转**: 采用 `LangGraph` 替代传统的 `AgentExecutor`，将大模型的 ReAct (Reason+Act) 循环升级为高度透明、可控的状态机架构
-- **按需搜索路由**: Agent 能够自主判断任务复杂度，在"本地私有知识库 (Local Knowledge)"与"广域网实时搜索 (Web Search)"之间进行精准路由与多步拆解
-- **双擎驱动**: 支持按需切换云端模型（如 Gemini 2.5 Flash）与本地开源模型（如 Qwen 3）
+### 2. 专业级 ToB 数据看板 (React + Vite + Tailwind)
+- **身份感知控制面板**: 模拟真实业务场景，支持 [商业化]、[公关]、[策划]、[技术] 四类运营身份的动态切换。
+- **AI 矛盾日报**: 利用 Qwen-Plus 的长文本能力，实时从海量反馈中提炼“今日全服核心冲突”，并给出运营建议。
+- **互动式工单流**: 配合玻璃拟态（Glassmorphism）设计，提供实时的 OCR 图文展示与 AI 决策逻辑复现。
 
-### 2. 海马体：自适应混合检索引擎 (Hybrid RAG + LinUCB)
+### 3. 海马体：自适应混合检索引擎 (Hybrid RAG + LinUCB)
+- **自适应权重 (LinUCB)**: 业内领先的 Contextual Bandit 架构。系统根据玩家 Query 的特征，**实时、动态**调节向量检索（Chroma）与词频检索（BM25）的 Alpha 权重。
+- **精细化推荐**: 系统会根据运营人员的点击行为，通过 LinUCB 进行在线增量学习，确保“最紧急、最对口”的工单精准分发给最合适的运营身份。
 
-- **稠密与稀疏双路召回**: 底层集成 Chroma 向量库与 BM25 词频检索，兼顾语义泛化与关键词精准度
-- **LinUCB 动态权重分配 (自适应 Alpha)**: 区别于传统的固定权重，系统手写实现了 Contextual Bandit (上下文多臂老虎机) 算法。根据 Query 的长度、特殊字符密度等特征，**在线动态调节**双路召回的 Alpha 权重，实现检索策略的自我进化
-
-### 3. 高阶检索算法组 (Advanced Algorithms)
-
-- **最大边际相关性重排 (MMR)**: 引入自定义的 MMR 算法对初次召回文档进行多样性重排，有效降低上下文冗余度
-- **伪相关反馈 (PRF)**: 结合 `Scikit-learn` 的 TF-IDF 算法，自动提取初次召回文档的核心特征词，实现查询发散与扩展 (Query Expansion)，大幅提升长尾问题的召回率
-
-### 4. 边缘系统与韦尼克区：NLP 感知流水线 (Perception)
-
-- **情感前处理 (Sentiment Analysis)**: 放弃原有的 RoBERTa 情感分类模型，重构升级为基于 LLM + Pydantic 的零样本（Zero-shot）结构化提取方案，解决了传统 NLP 模型无法理解游戏黑话的痛点，将单维度的“情绪打分”升维至包含 [强度党]、[剧情党] 等多维度的精细化玩家画像（Persona）打标，大幅提升了客诉分类的业务可用性。
-- **实体识别后处理 (NER)**: 提取大模型生成结果中的关键实体（人名、地名、机构等），存入csv监控表。
-
-### 5. 可视化交互控制台 (Streamlit UI)
-
-- 提供完整的参数中控台，支持实时调节 Top-K、Temperature 以及各个算法模块的开关
-- **语义空间降维可视化**: 引入 PCA 算法，实时抓取 ChromaDB 中的高维 Embedding 向量，映射为 2D 散点图，直观展示知识库的数据分布
+### 4. 自动化管线 (LangGraph Pipeline)
+- **双 Agent 审查**: 情绪审查员 (Sentiment) + 标签路由员 (Router) 协作，利用 Pydantic 结构化输出确保 100% 的机器可解释性。
+- **多模态感知**: 集成 PaddleOCR 与 Docling，支持玩家截图反馈的结构化解析。
 
 ---
 
 ## 📁 模块化项目结构
 
 ```text
+dashboard-ui/           # React 前端工程 (Vite + Tailwind)
 newcons/
-├── api/
-│   └── server.py           # FastAPI 后端服务
-├── ui/
-│   └── app.py              # Streamlit 可视化前端
-├── core/
-│   └── config.py           # 全局配置与环境变量管理
 ├── agent/
-│   ├── graph_brain.py      # LangGraph 状态机定义与节点编排
-│   └── tools.py            # 工具层封装，串联底层 RAG 与算法模块
-├── engine/
-│   ├── vector_store.py     # 向量存储与混合索引构建
-│   └── rag_pipeline.py     # 混合检索与生成流水线
+│   ├── graph_brain.py  # LangGraph 多步决策大脑 (DuckDuckGo 增强)
+│   ├── ticket_pipeline.py # 自动化工单处理流水线
+│   └── tools.py        # 业务专属 Agent 工具集
 ├── algorithms/
-│   ├── linucb.py           # LinUCB 上下文 Bandit 算法引擎
-│   ├── mmr.py              # 最大边际相关性重排算法
-│   └── prf.py              # 伪相关反馈查询扩展算法
+│   ├── linucb.py       # 强化学习推荐引擎 (Contextual Bandit)
+│   └── ...             # MMR / PRF 等 RAG 优化算法
+├── api/
+│   └── server.py       # FastAPI 高性能后端 (接入阿里云百炼)
+├── engine/
+│   ├── vector_store.py # Chroma 混合向量记忆体
+│   └── rag_pipeline.py # 点击闭环的 RAG 检索流程
 └── perception/
-    └── nlp_pipeline.py     # 基于 HuggingFace Pipeline 的情感与 NER 模块
+    └── nlp_pipeline.py # 多模态语义感知 (Qwen 驱动)
 ```
 
 ---
 
 ## 🚀 快速启动指南
 
-### 1. 基础环境
-
-推荐使用 Python 3.10+，克隆代码并安装依赖：
+### 1. 安装依赖
 
 ```bash
-git clone https://github.com/your-username/RAG-Agent.git
-cd RAG-Agent
+# 后端依赖
 pip install -r requirements.txt
+
+# 前端依赖
+cd dashboard-ui
+npm install
 ```
 
 ### 2. 环境配置
-
-在项目根目录创建 `.env` 文件，配置必要的大模型 API 密钥：
-
+在根目录创建 `.env` 文件：
 ```env
-GOOGLE_API_KEY=your_google_api_key_here
-TAVILY_API_KEY=your_tavily_api_key_here
+DASHSCOPE_API_KEY=您的阿里云百炼API密钥
 ```
 
-> 注：如需在国内网络环境使用 API，请在 `core/config.py` 中确认代理端口配置
+### 3. 启动全链路
 
-### 3. 启动后端服务
-
+**一键启动后端 (Port 8000):**
 ```bash
 cd newcons
-uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload
+python api/server.py
 ```
 
-后端服务将在 `http://localhost:8000` 启动
-
-### 4. 启动前端界面（新终端）
-
+**一键启动前端 (Port 5173):**
 ```bash
-cd newcons
-streamlit run ui/app.py
+cd dashboard-ui
+npm run dev
 ```
 
-打开浏览器访问 `http://localhost:8501`，在左侧边栏上传 PDF 或 TXT 文档以"注入记忆"，即可开启全栈认知交互！
+---
+
+## 🏗️ 技术栈预览
+- **推理层**: 阿里云百炼 (Qwen-Plus), LangChain, LangGraph
+- **存储层**: ChromaDB (Vector), SQLite (Log)
+- **前端层**: React, Tailwind CSS, Lucide Icons, Vite
+- **算法层**: Scikit-Learn (PCA), LinUCB, BM25, MMR, PRF
+- **多模态**: PaddleOCR, Docling
 
 ---
 
-## 🎯 核心功能特性
-
-### Agent 工作流
-- 自主路由决策
-- 多步工具调用
-- 思考流程可视化
-
-### 智能检索
-- 混合检索（向量 + BM25）
-- LinUCB 自适应权重
-- MMR 多样性重排
-- PRF 查询扩展
-
-### 情感分析
-- 实时情绪识别
-- 玩家画像打标
-- 舆情自动监控
-
-### 可视化
-- 语义空间 2D 映射
-- 社区反馈看板
-- 实时参数调节
-
----
-
-## 🔒 安全特性
-
-本项目已实施以下安全措施：
-
-- ✅ API 密钥环境变量隔离
-- ✅ 文件上传类型和大小验证
-- ✅ 线程安全的全局状态管理
-- ✅ 完善的异常处理机制
-- ✅ 多编码格式自动检测
-
----
-
-## 📊 技术栈
-
-- **后端框架**: FastAPI
-- **前端框架**: Streamlit
-- **AI 框架**: LangChain, LangGraph
-- **向量数据库**: ChromaDB
-- **检索算法**: BM25, MMR, PRF
-- **强化学习**: LinUCB (Contextual Bandit)
-- **NLP**: HuggingFace Transformers
-- **可视化**: Plotly, PCA
-
+## 📊 路线图 (Roadmap)
+- [x] 基于 React 的 ToB 看板重构
+- [x] 阿里云百炼 (DashScope) 全栈适配
+- [x] 强化学习 (LinUCB) 推荐奖励闭环
+- [ ] 实时语音客诉接入
+- [ ] 自动化 PR 公告导出 (PDF)

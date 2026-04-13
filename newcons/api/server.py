@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 import tempfile
@@ -7,15 +8,30 @@ import pandas as pd
 import json  # 使用json替代ast
 import sys
 import threading  # 添加线程锁
+from typing import List, Any
+from langchain_community.chat_models import ChatTongyi
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from engine.vector_store import build_hybrid_knowledge_base, visualize_semantic_space
+from engine.vector_store import build_hybrid_knowledge_base, visualize_semantic_space, add_feedback_event_to_db
 from engine.rag_pipeline import get_answer_complex, log_negative_feedback_sync
+from engine.ingestion_pipeline import IngestionPipeline
+from agent.ticket_pipeline import app_ticket_pipeline
+from core.models import FeedbackEvent
+from algorithms.linucb import ticket_recommender
 from agent.graph_brain import build_graph_agent
 from langchain_community.retrievers import BM25Retriever
 
 
-app = FastAPI(title="Cognitive Agent API", description="游戏智能运营大盘后台引擎")
+app = FastAPI(title="Cognitive Agent API", description="Game Intelligent Ops Dashboard Backend Engine")
+
+# 启用 CORS 跨域支持
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # 生产环境建议指定具体域名
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 添加线程锁保护全局状态
 global_memory = {
@@ -47,6 +63,83 @@ class FeedbackRequest(BaseModel):
     reward: float
 
 
+# 初始化全局管道实例 (延迟加载)
+pipeline = IngestionPipeline()
+
+async def run_ticket_pipeline_async(event: FeedbackEvent, vs: Any):
+    """在后台不阻塞返回的情况下运行工单处理流"""
+    try:
+        inputs = {
+            "event": event,
+            "vectorstore": vs,
+            "alert_triggered": False
+        }
+        # 使用 run_in_threadpool 因为 LangGraph 执行通常是同步且耗时的
+        await run_in_threadpool(app_ticket_pipeline.invoke, inputs)
+    except Exception as e:
+        print(f"[Pipeline Error] Ticket pipeline failed: {e}")
+
+@app.post("/api/v1/ingest/feedback")
+async def ingest_feedback(
+    background_tasks: BackgroundTasks,
+    feedback_text: str = Form(None),
+    doc_file: UploadFile = File(None),
+    images: List[UploadFile] = File([])
+):
+    """
+    接收图文混合反馈，利用 Docling 和 PaddleOCR 进行结构化解析并存入向量库
+    """
+    tmp_files = []
+    try:
+        # 1. 保存文档文件
+        doc_path = None
+        if doc_file:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(doc_file.filename)[1]) as tmp:
+                tmp.write(await doc_file.read())
+                doc_path = tmp.name
+                tmp_files.append(doc_path)
+
+        # 2. 保存图片文件
+        img_paths = []
+        for img_file in images:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(img_file.filename)[1]) as tmp:
+                tmp.write(await img_file.read())
+                img_paths.append(tmp.name)
+                tmp_files.append(tmp.name)
+
+        # 3. 执行管道任务 (因为 OCR 比较慢，建议在 run_in_threadpool 中执行)
+        event = await run_in_threadpool(
+            pipeline.run, 
+            text_content=feedback_text, 
+            text_file_path=doc_path, 
+            image_paths=img_paths
+        )
+
+        # 4. 存入向量库并触发工单流水线
+        with memory_lock:
+            vs = global_memory["vectorstore"]
+            if vs:
+                add_feedback_event_to_db(event, vs)
+                # 将流水线处理丢入后台任务，不增加用户等待时长
+                background_tasks.add_task(run_ticket_pipeline_async, event, vs)
+            else:
+                return {"status": "error", "message": "Vector store not initialized."}
+
+        return {
+            "status": "success",
+            "event_id": event.event_id,
+            "ocr_summary": [res.dict() for res in event.ocr_results],
+            "enriched_text_preview": event.get_enriched_text()[:200]
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # 清理临时文件
+        for f in tmp_files:
+            if os.path.exists(f):
+                os.remove(f)
+
 @app.post("/upload_memory")
 async def upload_memory(file: UploadFile = File(...)):
     """处理前端上传的文档，注入全局记忆并生成可视化数据"""
@@ -56,7 +149,7 @@ async def upload_memory(file: UploadFile = File(...)):
         if file_ext not in ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=400, 
-                detail=f"不支持的文件类型。仅支持: {', '.join(ALLOWED_EXTENSIONS)}"
+                detail=f"Unsupported file type. Supported: {', '.join(ALLOWED_EXTENSIONS)}"
             )
         
         # 读取文件内容并验证大小
@@ -96,7 +189,7 @@ async def upload_memory(file: UploadFile = File(...)):
         os.remove(tmp_path)
         return {
             "status": "success",
-            "message": f"记忆固化成功，共 {count} 个片段。",
+            "message": f"Memory solidified, {count} fragments processed.",
             "viz_data": viz_data_json,
         }
     except HTTPException:
@@ -158,7 +251,7 @@ async def chat_endpoint(req: ChatRequest, background_tasks: BackgroundTasks):
             for msg in response["messages"][1:-1]:
                 if msg.type == "ai" and getattr(msg, "tool_calls", None):
                     for tc in msg.tool_calls:
-                        thoughts.append(f"🛠️ 调用工具: {tc['name']}")
+                        thoughts.append(f"Tool Call: {tc['name']}")
 
             # 2. 旁路提取玩家画像标签与 LinUCB 特征
             persona_tags = []
@@ -231,6 +324,66 @@ async def chat_endpoint(req: ChatRequest, background_tasks: BackgroundTasks):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/v1/dashboard/summary")
+async def dashboard_summary():
+    """聚合近期工单，生成 AI 矛盾日报摘要"""
+    try:
+        with memory_lock:
+            vs = global_memory["vectorstore"]
+        
+        if not vs:
+            return {"markdown": "Current database is empty, no summary available."}
+            
+        # 检索最近的 N 条记录 (这里简单取前 20 条用于总结)
+        docs = vs.get(limit=20, include=["documents"])
+        context = "\n---\n".join(docs["documents"])
+        
+        llm = ChatTongyi(model="qwen-plus", temperature=0.3)
+        prompt = f"""
+You are a professional game ops expert. Based on the following recent player feedback, generate a "Daily Community Conflict Report".
+Requirements:
+1. Use Markdown format.
+2. Include: Core Conflict Summary, Impact Scope, Operational Recommendations.
+3. Professional and concise tone.
+
+[Feedback Fragments]:
+{context}
+"""
+        res = await run_in_threadpool(llm.invoke, prompt)
+        return {"markdown": res.content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/dashboard/tickets")
+async def get_dashboard_tickets(role: str = None):
+    """
+    获取工单列表。支持按推荐角色进行实时过滤。
+    """
+    try:
+        with memory_lock:
+            vs = global_memory["vectorstore"]
+            
+        if not vs:
+            return {"tickets": []}
+            
+        # 获取所有带 metadata 的记录
+        data = vs.get(include=["metadatas", "documents"])
+        tickets = []
+        
+        for i in range(len(data["ids"])):
+            meta = data["metadatas"][i]
+            # 如果 event_json 存在，优先解析它
+            if "event_json" in meta:
+                ticket_data = json.loads(meta["event_json"])
+                # 这种动态过滤逻辑可以在前端做，也可以后端做
+                tickets.append(ticket_data)
+        
+        # 简单模拟：如果 URL 传了 role，我们这里可以做一次过滤（实际推荐结果应存储在 metadata 中）
+        # 目前阶段我们假设前端负责根据推荐结果进行高亮
+        return {"tickets": tickets[::-1]} # 返回按时间倒序
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/feedback")
 async def explicit_feedback(req: FeedbackRequest):
     """接收前端传回的点赞或点踩，作为 LinUCB 的显式奖励"""
@@ -240,4 +393,23 @@ async def explicit_feedback(req: FeedbackRequest):
         return {"status": "success", "message": "Feedback received and LinUCB updated."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+class RecommendationFeedback(BaseModel):
+    arm_idx: int
+    context_vec: list
+    reward: float  # 1 为有用/处理，0 为忽略
+
+@app.post("/api/v1/recommendation/reward")
+async def recommendation_reward(req: RecommendationFeedback):
+    """接收运营人员对分发结果的实时反馈，更新 LinUCB 权重"""
+    try:
+        # 直接调用重构后的 recommender 实例进行增量学习
+        ticket_recommender.update_reward(req.arm_idx, req.context_vec, req.reward)
+        return {"status": "success", "message": f"Operator feedback recorded for arm {req.arm_idx}."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 

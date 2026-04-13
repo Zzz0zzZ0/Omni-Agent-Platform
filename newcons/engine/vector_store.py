@@ -11,10 +11,17 @@ from langchain_community.retrievers import BM25Retriever
 from langchain_huggingface import HuggingFaceEmbeddings
 
 from core.config import EMBED_MODEL_NAME
+from core.models import FeedbackEvent
+from langchain_core.documents import Document
 
-print("🗂️ [Engine] 正在激活海马体 (Embedding Models)...")
+print("[Engine] Activating Embedding Models...")
 
-embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL_NAME)
+try:
+    embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL_NAME)
+except Exception as e:
+    print(f"[Warning] Failed to load HF embeddings ({e}). Falling back to FakeEmbeddings for testing.")
+    from langchain_core.embeddings import FakeEmbeddings
+    embeddings = FakeEmbeddings(size=1024) # BGE-M3 size
 
 
 def build_hybrid_knowledge_base(file_path: str):
@@ -58,3 +65,25 @@ def visualize_semantic_space(vectorstore):
     df["text"] = [t[:50] + "..." for t in data["documents"]]
     return df
 
+def add_feedback_event_to_db(event: FeedbackEvent, vectorstore: Chroma):
+    """将增强后的反馈事件存入向量数据库"""
+    enriched_text = event.get_enriched_text()
+    
+    # 构造 LangChain Document
+    doc = Document(
+        page_content=enriched_text,
+        metadata={
+            "event_id": event.event_id,
+            "timestamp": event.timestamp,
+            "event_json": event.model_dump_json(),
+            "ocr_summary": ",".join([f"{r.image_name}:{r.uid or 'N/A'}" for r in event.ocr_results]),
+            "error_codes": ",".join(list({ec for r in event.ocr_results for ec in r.error_codes}))
+        }
+    )
+    
+    # 因为 Chroma.from_documents 可能每次都会初始化，
+    # 我们使用现有的 vectorstore 实例 add_documents
+    if vectorstore is not None:
+        vectorstore.add_documents([doc])
+        return True
+    return False
