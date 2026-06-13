@@ -1,53 +1,36 @@
-import os
-import sqlite3
-from datetime import datetime
+"""
+RAG 混合检索管线 — 租户感知化。
+接受 VectorStoreManager 和 DomainPlugin 作为参数，不再依赖全局状态。
+"""
+import concurrent.futures
 
-import pandas as pd
-from sklearn.metrics.pairwise import cosine_similarity
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_community.chat_models import ChatTongyi
-from langchain_ollama import ChatOllama
 from langchain_core.tools import StructuredTool
-from langchain_core.tools import tool as lc_tool  # if needed elsewhere
 from pydantic import BaseModel, Field
 
-from engine.vector_store import embeddings
-from perception.nlp_pipeline import analyze_user_query
-from algorithms.linucb import ticket_recommender
+from algorithms.linucb import LinUCBRecommender
 from algorithms.prf import algo_pseudo_relevance_feedback
 from algorithms.mmr import algo_mmr_rerank
+from core.logger import log
 
 
-# ==========================================
-# 初始化 SQLite 数据库
-# ==========================================
-def _init_db():
-    conn = sqlite3.connect("community_feedback_log.db")
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS feedback_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            Timestamp TEXT,
-            Player_Query TEXT,
-            Emotion TEXT,
-            Player_Persona TEXT,
-            Status TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-_init_db()
-
-# ==========================================
-# 核心单步检索回路 (包含舆情落表)
-# ==========================================
+def get_llm(model_type: str = "cloud", temp: float = 0.1):
+    """根据 provider 创建 LLM 实例"""
+    if model_type == "local":
+        from langchain_ollama import ChatOllama
+        return ChatOllama(model="qwen3:8b", temperature=temp)
+    else:
+        from langchain_community.chat_models import ChatTongyi
+        return ChatTongyi(model="qwen-plus", temperature=temp)
 
 
 def get_answer_complex(
     vectorstore,
     bm25_retriever,
-    question,
+    question: str,
+    embeddings,
+    linucb: LinUCBRecommender | None = None,
+    perception_fn=None,
     k_param: int = 3,
     temp_param: float = 0.1,
     alpha: float = 0.5,
@@ -56,104 +39,81 @@ def get_answer_complex(
     use_rerank: bool = False,
     use_auto_alpha: bool = False,
     use_emotion: bool = False,
-    use_ner: bool = False,
 ):
+    """核心单步检索回路"""
     emotion_label = "neutral"
     extracted_entities = []
     player_persona = []
 
-import concurrent.futures
-
-def log_negative_feedback_sync(question, emotion_label, persona_str):
-    try:
-        conn = sqlite3.connect("community_feedback_log.db", timeout=10)
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO feedback_logs (Timestamp, Player_Query, Emotion, Player_Persona, Status) VALUES (?, ?, ?, ?, ?)",
-            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), question, emotion_label, persona_str, "Pending_Review")
-        )
-        conn.commit()
-    except Exception as e:
-        print(f"Failed to log feedback: {e}")
-    finally:
-        try:
-            conn.close()
-        except:
-            pass
-        
-    # 0. NLP 结构化感知 (情绪、实体、玩家画像)
-    if use_emotion or use_ner:
-        emotion_label, extracted_entities, player_persona = analyze_user_query(
+    # 0. NLP 感知
+    if use_emotion and perception_fn:
+        emotion_label, extracted_entities, player_persona = perception_fn(
             question, model_type=model_type, temp_val=temp_param
         )
 
-    # 1. 模型初始化
-    if model_type == "local":
-        llm = ChatOllama(model="qwen3:8b", temperature=temp_param)
-    else:
-        llm = ChatTongyi(model="qwen-plus", temperature=temp_param)
+    # 1. LLM
+    llm = get_llm(model_type, temp_param)
 
     # 2. LinUCB
     final_alpha = alpha
     arm_idx = -1
     context_vec = None
-    if use_auto_alpha:
-        # 使用 Query 的 embedding 切片作为 LinUCB 特征
+    if use_auto_alpha and linucb:
         q_vec = embeddings.embed_query(question)
-        arm_idx, final_alpha, context_vec = ticket_recommender.select_arm(q_vec)
+        arm_idx, final_alpha, context_vec = linucb.select_arm(q_vec)
 
-    # 3. 混合检索 (增加空载保护)
+    # 3. 混合检索
     initial_docs = []
     seen_contents = set()
-    
-    # 【修复点 1】：只有在记忆库存在时，才启动检索
+
     if vectorstore is not None and bm25_retriever is not None:
         chroma_retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
 
-        # 分别独立召回 - 并发优化
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             future_vs = executor.submit(chroma_retriever.invoke, question)
             future_bm25 = executor.submit(bm25_retriever.invoke, question)
             docs_vs = future_vs.result()
             docs_bm25 = future_bm25.result()
 
-        # 根据 LinUCB 动态权重 (final_alpha) 精准分配配额
         k_vs = max(1, int(15 * final_alpha))
         k_bm25 = max(1, int(15 * (1 - final_alpha)))
 
-        # 手动合并与去重
-        for doc in (docs_vs[:k_vs] + docs_bm25[:k_bm25]):
+        for doc in docs_vs[:k_vs] + docs_bm25[:k_bm25]:
             if doc.page_content not in seen_contents:
                 initial_docs.append(doc)
                 seen_contents.add(doc.page_content)
 
-    # 4. PRF 发散思维
+    # 4. PRF
     search_queries = [question]
-    if use_multiquery and initial_docs: # 【修复点 2】：有初始文档才发散
+    if use_multiquery and initial_docs:
         search_queries = algo_pseudo_relevance_feedback(question, initial_docs)
-        if len(search_queries) > 1:
-            pass
     unique_docs = list({doc.page_content: doc for doc in initial_docs}.values())
 
-    # 5. 用户显式奖励系统已剥离，不再计算 cosine similarity 作为自我奖励
-    # 6. MMR 重排序
+    # 5. MMR 重排序
     final_docs = (
         algo_mmr_rerank(question, unique_docs, embeddings, k_param=k_param)
         if use_rerank and unique_docs
         else unique_docs[:k_param]
     )
 
-    # 7. 生成阶段
+    # 6. 生成
     tone_instruction = (
-        "User detected as anxious. Use calm and soothing tone." if emotion_label == "negative" else ""
+        "User detected as anxious. Use calm and soothing tone."
+        if emotion_label == "negative"
+        else ""
     )
-    
-    # 如果没有文档，就不要强行插入“【记忆片段】”让它困惑了
+
     if final_docs:
-        system_prompt = f"You are a cognitive agent. {tone_instruction}\nAnswer based on memory fragments.\n\n[Memory Fragments]:\n{{context}}"
+        system_prompt = (
+            f"You are a cognitive agent. {tone_instruction}\n"
+            f"Answer based on memory fragments.\n\n[Memory Fragments]:\n{{context}}"
+        )
         context_text = "\n\n".join([d.page_content for d in final_docs])
     else:
-        system_prompt = f"You are a professional game ops cognitive agent. {tone_instruction}\nPlease answer based on your knowledge base."
+        system_prompt = (
+            f"You are a professional game ops cognitive agent. {tone_instruction}\n"
+            f"Please answer based on your knowledge base."
+        )
         context_text = "(No external memory found)"
 
     prompt = ChatPromptTemplate.from_template(system_prompt + "\n\n问题: {input}")
@@ -173,18 +133,29 @@ def log_negative_feedback_sync(question, emotion_label, persona_str):
     }
 
 
+# ── LocalKnowledgeTool (供 Agent 调用) ──────────────────────────
+
 class LocalSearchInput(BaseModel):
     query: str = Field(description="需要搜索的具体问题字符串")
 
 
 class LocalKnowledgeTool:
-    def __init__(self, vectorstore, bm25_retriever, **kwargs):
+    def __init__(self, vectorstore, bm25_retriever, embeddings, linucb=None, **kwargs):
         self.vectorstore = vectorstore
         self.bm25_retriever = bm25_retriever
+        self.embeddings = embeddings
+        self.linucb = linucb
         self.config = kwargs
 
     def _run_search(self, query: str) -> str:
-        result = get_answer_complex(self.vectorstore, self.bm25_retriever, query, **self.config)
+        result = get_answer_complex(
+            self.vectorstore,
+            self.bm25_retriever,
+            query,
+            embeddings=self.embeddings,
+            linucb=self.linucb,
+            **self.config,
+        )
         docs_text = "\n".join([f"- {d.page_content}" for d in result["context"]])
         return f"[Conclusion]: {result['answer']}\n[References]:\n{docs_text}\n"
 
