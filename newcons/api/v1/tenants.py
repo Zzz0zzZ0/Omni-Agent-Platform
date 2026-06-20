@@ -7,10 +7,15 @@ from sqlalchemy import select
 
 from core.database import get_db
 from core.models.tenant import TenantModel
+from core.security import require_admin_api_key
 from api.schemas import TenantCreate, TenantResponse
 from domains.registry import DomainRegistry
 
-router = APIRouter(prefix="/api/v1/tenants", tags=["tenants"])
+router = APIRouter(
+    prefix="/api/v1/tenants",
+    tags=["tenants"],
+    dependencies=[Depends(require_admin_api_key)],
+)
 
 
 @router.post("/", response_model=TenantResponse)
@@ -51,6 +56,11 @@ async def list_tenants(db: AsyncSession = Depends(get_db)):
     ]
 
 
+@router.get("/domains/available")
+async def list_domains():
+    return DomainRegistry.list_all()
+
+
 @router.get("/{tenant_id}", response_model=TenantResponse)
 async def get_tenant(tenant_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(TenantModel).where(TenantModel.id == tenant_id))
@@ -61,8 +71,3 @@ async def get_tenant(tenant_id: str, db: AsyncSession = Depends(get_db)):
         id=tenant.id, name=tenant.name, api_key=tenant.api_key,
         domain_id=tenant.domain_id, is_active=tenant.is_active,
     )
-
-
-@router.get("/domains/available")
-async def list_domains():
-    return DomainRegistry.list_all()

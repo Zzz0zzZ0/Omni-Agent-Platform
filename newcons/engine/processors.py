@@ -3,7 +3,7 @@ import os
 from typing import List, Optional
 from docling.document_converter import DocumentConverter
 from paddleocr import PaddleOCR
-from core.models import OCRResult
+from domains.game_ops.schemas import OCRResult
 
 class DoclingProcessor:
     """Use Docling for document structure analysis"""

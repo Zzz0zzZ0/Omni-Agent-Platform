@@ -35,13 +35,17 @@ export default function DashboardPage() {
   }, [currentRole]);
 
   useEffect(() => {
-    loadData();
+    queueMicrotask(() => {
+      loadData();
+    });
   }, [loadData]);
 
   // WebSocket 实时更新
   useEffect(() => {
     if (lastMessage?.type === "ticket_processed") {
-      loadData(); // 有新工单处理完成，刷新看板
+      queueMicrotask(() => {
+        loadData();
+      });
     }
   }, [lastMessage, loadData]);
 

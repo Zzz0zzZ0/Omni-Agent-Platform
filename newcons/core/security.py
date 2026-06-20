@@ -1,6 +1,8 @@
 """
 安全层 — API Key 鉴权，从请求头提取 tenant 上下文。
 """
+import secrets
+
 from fastapi import Header, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -32,3 +34,13 @@ async def get_current_tenant(
         domain_id=tenant.domain_id,
         config=tenant.config or {},
     )
+
+
+async def require_admin_api_key(
+    x_admin_key: str | None = Header(None, alias="X-Admin-Key"),
+) -> None:
+    """Protect platform-admin routes when ADMIN_API_KEY is configured."""
+    if not settings.admin_api_key:
+        return
+    if not x_admin_key or not secrets.compare_digest(x_admin_key, settings.admin_api_key):
+        raise HTTPException(status_code=403, detail="Invalid admin API key")

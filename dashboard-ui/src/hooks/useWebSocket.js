@@ -1,21 +1,25 @@
 "use client";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createWebSocket, getApiKey } from "@/lib/api";
 
-/**
- * WebSocket hook — 自动连接、重连、心跳。
- * 返回 { lastMessage, isConnected, sendMessage }
- */
 export function useWebSocket() {
   const [lastMessage, setLastMessage] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef(null);
+  const connectRef = useRef(null);
   const reconnectTimer = useRef(null);
   const heartbeatTimer = useRef(null);
+
+  const clearTimers = useCallback(() => {
+    clearTimeout(reconnectTimer.current);
+    clearInterval(heartbeatTimer.current);
+  }, []);
 
   const connect = useCallback(() => {
     const apiKey = getApiKey();
     if (!apiKey) return;
+
+    clearTimers();
 
     try {
       const ws = createWebSocket(apiKey);
@@ -23,7 +27,6 @@ export function useWebSocket() {
 
       ws.onopen = () => {
         setIsConnected(true);
-        // 心跳
         heartbeatTimer.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send("ping");
@@ -42,25 +45,29 @@ export function useWebSocket() {
 
       ws.onclose = () => {
         setIsConnected(false);
-        clearInterval(heartbeatTimer.current);
-        // 5s 后重连
-        reconnectTimer.current = setTimeout(connect, 5000);
+        clearTimers();
+        reconnectTimer.current = setTimeout(() => connectRef.current?.(), 5000);
       };
 
       ws.onerror = () => {
         ws.close();
       };
-    } catch {}
-  }, []);
+    } catch {
+      reconnectTimer.current = setTimeout(() => connectRef.current?.(), 5000);
+    }
+  }, [clearTimers]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   useEffect(() => {
     connect();
     return () => {
-      clearTimeout(reconnectTimer.current);
-      clearInterval(heartbeatTimer.current);
+      clearTimers();
       if (wsRef.current) wsRef.current.close();
     };
-  }, [connect]);
+  }, [clearTimers, connect]);
 
   const sendMessage = useCallback((msg) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

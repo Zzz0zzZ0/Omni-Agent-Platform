@@ -59,8 +59,9 @@ export async function sendRecommendationFeedback(armIdx, contextVec, reward) {
 }
 
 // ── Tenants (Admin) ─────────────────────────────────────────
-export async function createTenant(name, domainId = "game_ops") {
-  const res = await api.post("/api/v1/tenants/", { name, domain_id: domainId });
+export async function createTenant(name, domainId = "game_ops", adminKey = "") {
+  const config = adminKey ? { headers: { "X-Admin-Key": adminKey } } : undefined;
+  const res = await api.post("/api/v1/tenants/", { name, domain_id: domainId }, config);
   return res.data;
 }
 

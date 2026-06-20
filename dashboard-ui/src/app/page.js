@@ -7,6 +7,7 @@ import { LayoutDashboard, Key, Plus } from "lucide-react";
 export default function LoginPage() {
   const [apiKey, setApiKeyState] = useState("");
   const [tenantName, setTenantName] = useState("");
+  const [adminKey, setAdminKey] = useState(process.env.NEXT_PUBLIC_ADMIN_API_KEY || "");
   const [showCreate, setShowCreate] = useState(false);
   const [createdKey, setCreatedKey] = useState("");
   const [error, setError] = useState("");
@@ -27,7 +28,7 @@ export default function LoginPage() {
   const handleCreate = async () => {
     if (!tenantName.trim()) return;
     try {
-      const res = await createTenant(tenantName.trim());
+      const res = await createTenant(tenantName.trim(), "game_ops", adminKey.trim());
       setCreatedKey(res.api_key);
       setApiKeyState(res.api_key);
       setError("");
@@ -100,6 +101,13 @@ export default function LoginPage() {
                 value={tenantName}
                 onChange={(e) => setTenantName(e.target.value)}
                 placeholder="租户名称（如：XX 游戏工作室）"
+                className="w-full px-4 py-3 bg-white/5 border border-[var(--border)] rounded-xl text-sm focus:border-[var(--accent)] focus:outline-none"
+              />
+              <input
+                type="password"
+                value={adminKey}
+                onChange={(e) => setAdminKey(e.target.value)}
+                placeholder="Admin API Key (optional in local dev)"
                 className="w-full px-4 py-3 bg-white/5 border border-[var(--border)] rounded-xl text-sm focus:border-[var(--accent)] focus:outline-none"
               />
               <button

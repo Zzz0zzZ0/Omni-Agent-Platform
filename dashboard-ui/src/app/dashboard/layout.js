@@ -9,15 +9,22 @@ export default function DashboardLayout({ children }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? localStorage.getItem("api_key") : null;
-    if (saved) {
-      setApiKey(saved);
-      setReady(true);
-    } else if (!getApiKey()) {
-      router.push("/");
-    } else {
-      setReady(true);
-    }
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      const saved = typeof window !== "undefined" ? localStorage.getItem("api_key") : null;
+      if (saved) {
+        setApiKey(saved);
+        setReady(true);
+      } else if (!getApiKey()) {
+        router.push("/");
+      } else {
+        setReady(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (!ready) {

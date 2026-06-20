@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     # ── Security ─────────────────────────────────────────────────
     api_key_header: str = "X-API-Key"
+    admin_api_key: Optional[str] = None
 
     # ── WebSocket ────────────────────────────────────────────────
     ws_heartbeat_interval: int = 30

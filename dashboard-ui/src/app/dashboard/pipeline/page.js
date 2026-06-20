@@ -42,11 +42,17 @@ export default function PipelinePage() {
     }
   }, [currentRole]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    queueMicrotask(() => {
+      loadData();
+    });
+  }, [loadData]);
 
   useEffect(() => {
     if (lastMessage?.type === "ticket_processed") {
-      loadData();
+      queueMicrotask(() => {
+        loadData();
+      });
     }
   }, [lastMessage, loadData]);
 

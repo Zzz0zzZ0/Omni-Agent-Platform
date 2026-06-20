@@ -21,14 +21,16 @@ async def get_chat_service(
 
 async def get_ingest_service(
     tenant: TenantContext = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
 ) -> IngestService:
-    return IngestService(tenant)
+    return IngestService(tenant, db)
 
 
 async def get_dashboard_service(
     tenant: TenantContext = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
 ) -> DashboardService:
-    return DashboardService(tenant)
+    return DashboardService(tenant, db)
 
 
 async def get_ticket_service(

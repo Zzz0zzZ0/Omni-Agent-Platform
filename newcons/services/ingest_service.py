@@ -8,8 +8,10 @@ from typing import List
 from fastapi import UploadFile
 from fastapi.concurrency import run_in_threadpool
 from langchain_core.documents import Document
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.tenant import TenantContext
+from core.models.ticket import TicketModel
 from core.logger import log
 from domains.registry import DomainRegistry
 from domains.game_ops.schemas import FeedbackEvent
@@ -26,8 +28,9 @@ _ticket_pipeline = build_ticket_pipeline()
 
 
 class IngestService:
-    def __init__(self, tenant_ctx: TenantContext):
+    def __init__(self, tenant_ctx: TenantContext, db: AsyncSession | None = None):
         self.tenant_ctx = tenant_ctx
+        self.db = db
         self.domain = DomainRegistry.get(tenant_ctx.domain_id)
         self.vs_manager = get_vs_manager(tenant_ctx)
         self.linucb = get_linucb(tenant_ctx, self.domain)
@@ -99,7 +102,7 @@ class IngestService:
                 image_paths=img_paths,
             )
 
-            # 存入向量库
+            # Persist to vector memory when a tenant knowledge base already exists.
             vs = self.vs_manager.get_vectorstore()
             if vs:
                 doc = Document(
@@ -112,12 +115,13 @@ class IngestService:
                 )
                 self.vs_manager.add_document(doc)
 
-                # 异步触发工单流水线
-                await self._run_ticket_pipeline(event, vs)
+            pipeline_result = await self._run_ticket_pipeline(event, vs)
+            ticket = await self._persist_ticket(event, pipeline_result)
 
             return {
                 "status": "success",
                 "event_id": event.event_id,
+                "ticket_id": ticket.id if ticket else None,
                 "ocr_summary": [r.model_dump() for r in event.ocr_results],
                 "enriched_text_preview": event.get_enriched_text()[:200],
             }
@@ -126,7 +130,7 @@ class IngestService:
                 if os.path.exists(f):
                     os.remove(f)
 
-    async def _run_ticket_pipeline(self, event: FeedbackEvent, vs) -> None:
+    async def _run_ticket_pipeline(self, event: FeedbackEvent, vs) -> dict:
         """运行工单流水线并通过 WebSocket 推送结果"""
         try:
             inputs = {
@@ -149,5 +153,42 @@ class IngestService:
                     "alert_triggered": result.get("alert_triggered", False),
                 },
             )
+            return result
         except Exception as e:
             log.error(f"[Pipeline Error] Ticket pipeline failed: {e}")
+            return {
+                "sentiment": None,
+                "routing": None,
+                "recommended_operator": "",
+                "arm_idx": -1,
+                "context_vec": [],
+                "alert_triggered": False,
+            }
+
+    async def _persist_ticket(self, event: FeedbackEvent, pipeline_result: dict) -> TicketModel | None:
+        """Persist the processed feedback as the system-of-record ticket."""
+        if self.db is None:
+            return None
+
+        sentiment = pipeline_result.get("sentiment")
+        routing = pipeline_result.get("routing")
+        ticket = TicketModel(
+            tenant_id=self.tenant_ctx.tenant_id,
+            event_id=event.event_id,
+            raw_text=event.raw_text_content,
+            enriched_text=event.get_enriched_text(),
+            sentiment_score=getattr(sentiment, "sentiment_score", 0),
+            intent_summary=getattr(sentiment, "intent_summary", ""),
+            tags=getattr(routing, "tags", []) or [],
+            priority=getattr(routing, "priority", "P3") or "P3",
+            is_crisis=bool(getattr(routing, "is_crisis", False)),
+            action_item=getattr(routing, "action_item", "") or "",
+            recommended_operator=pipeline_result.get("recommended_operator", "") or "",
+            arm_idx=pipeline_result.get("arm_idx", -1),
+            context_vec=pipeline_result.get("context_vec", []) or [],
+            status="open",
+        )
+        self.db.add(ticket)
+        await self.db.flush()
+        await self.db.refresh(ticket)
+        return ticket
